@@ -1,3 +1,3 @@
 # FORECASTING HOTEL DEMAND USING MACHINE LEARNING APPROACHES
 Hotel Booking Demand and Cancellation Rate Forecast 
-<img width="280" alt="https://user-images.githubusercontent.com/87446059/151603944-29561c9e-8454-44e5-bac6-d937fd198c28.jpg">
+<img src= ![kevin-angelso-TArrnDJuxak-unsplash](https://user-images.githubusercontent.com/87446059/151604432-aca30c1e-fcf9-447a-a19b-ba5862775c1a.jpg) alt="Telegram Bot" width="300" height="350">
