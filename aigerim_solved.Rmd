@@ -1,0 +1,109 @@
+---
+title: "Heart dataset logistic regression"
+author: "Aigerim Madakimova"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+### 1) Given a**2+b**2+c**2 = 0, find the roots (values of a,b,c that satisfies the above constraint). Explain. What optimization method will you use? And why?
+\textcolor{red}{Answer:} By analogy with conic sections, there are also degenerate surfaces of the second order. So, the second-order equation a^2 = 0 describes a pair of coincident planes, equation a^2 = 1 describes a pair of parallel planes, equation a^2 – b^2 = 0 describes a pair of intersecting planes.
+The equation a^2 + b^2 + c^2 = 0 describes a point with coordinates (0; 0; 0). In general this equation has no solutions.
+In order to solve the equation we could use minimization since we have to get rid of the power while finding the minimum.
+
+### 2) consider the following R code
+--------------------variableImportance--------------------------
+```{r}
+if(!require(tfdatasets)) install.packages(c('tfdatasets'))
+library(tfdatasets)
+library(dplyr)
+data(hearts)
+hearts$thal <- as.numeric(factor(hearts$thal))
+if(!require(rpart)) install.packages(c('rpart'))
+library(rpart)
+require(rpart)
+tree.heart<-rpart(target~.,data=hearts)
+tree.heart$variable.importance
+
+```
+
+
+```{r}
+head(hearts)
+```
+
+--------------------variableImportance--------------------------
+### (A) set.seed(your_favorite_seed) Split your dataset 70/30 into training and test sets. Perform the below tasks using the same training and tests:
+
+```{r}
+set.seed(42)
+
+## 70% of the sample size
+smp_size <- floor(0.7 * nrow(hearts))
+
+## set the seed to make your partition reproducible
+train_ind <- sample(seq_len(nrow(hearts)), size = smp_size)
+
+train <- hearts[train_ind, ]
+test <- hearts[-train_ind, ]
+```
+
+### (A.1) Run Logistic Regression with the top 5 variables as indicated by variable.importance for the heart dataset 
+```{r}
+model_1 = glm(target ~ oldpeak + cp+ thalach+slope+exang, data = train, family = binomial)
+summary(model_1)
+```
+
+### (A.2) repeat with the top 3 variables 
+```{r}
+model_2 = glm(target ~ oldpeak + cp+ thalach, data = train, family = binomial)
+summary(model_2)
+```
+
+### (B) Determine the better performing model!
+```{r}
+# Anova of two best models selected
+anova(model_1, model_2, test = "LRT")
+```
+
+### (C) Explain how you determined the better model?
+
+\textcolor{red}{Answer:} According to the likelihood ratio test results of anova, model_2 values are statistically more significant than model_1 values, therefore we picked  model_2 to construct classification of heart diseases.
+
+### (D) Assume you had no variableImportance, can you think of any other method to be selective. Can you think of any other "objective" method to identify features that can better fit?
+
+\textcolor{red}{Answer:}Since we have multiple independent variables, we run chi square test to understand the relationship between predictor and each of the independent variables. we can try to fit the all values and pic the ones that are more statistically significant, so more stars near the column - the more statistically significant it is. Also we can try to use varImp(model) this is almost the same thing.
+
+```{r}
+summary(glm(target ~., data = train, family = binomial))
+```
+
+
+### D.1) Using an objective method, identify top 5 features and top 3 features as you did in (B) without using variableImportance, run two different models and compare the model  with the corresponding better models you identified in (B). So in total you have run 4 different models. Compare and contrast the results.
+
+```{r}
+model_3 = glm(target ~ ca + oldpeak+ exang+sex+thal, data = train, family = binomial)
+summary(model_3)
+```
+
+```{r}
+model_4 = glm(target ~ ca + oldpeak+ exang, data = train, family = binomial)
+summary(model_4)
+```
+
+```{r}
+# Anova of two best models selected
+anova(model_3, model_4, test = "LRT")
+```
+
+\textcolor{red}{Answer:} According to the likelihood ratio test results of anova, model_4 values are statistically more significant than model_3 values, therefore we picked  model_4 to construct classification of heart diseases
+
+### (E) Write a summary explaining your findings. 
+
+
+\textcolor{red}{Answer:} In this work, we have examined the presense of a heart disease from a set of variables including chollesterol, age, sex and others provided in the dataset. We found logistic regression model_4 to be a better model for prediction. Using anova and likelihood ratio test.
+
+
+
+
+

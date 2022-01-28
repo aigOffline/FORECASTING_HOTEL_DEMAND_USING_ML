@@ -1,0 +1,270 @@
+---
+title: "Comparing Bagging, Boosting and Stacking"
+output:
+  html_document:
+    df_print: paged
+author: 'Aigerim Madakimova'
+---
+
+
+Consider the the Breast Cancer Coimbra data set (available from UCI repository).
+
+Compare three different ensemble approaches, using the ‘caret’ package:
+
+- Bagging (treebag and rf)
+- Boosting (C5.0 and gdm)
+- Stacking (at least three models)
+
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+library(readr)
+library(caret)
+library(gbm)
+library(caretEnsemble)
+
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),
+                      tidy=TRUE)
+
+dataset <- read_csv("dataR2.csv")
+dataset$Classification <- factor(dataset$Classification, labels = c("Patient", "Control"))
+
+set.seed(2020)
+idxs_train <- createDataPartition(y = dataset$Classification, p = 0.75, list = FALSE)
+training <- dataset[idxs_train, ]
+testing <- dataset[-idxs_train, ]
+```
+
+
+- **Bagging** - Uses the same learning algorithm several times, with changes in the training dataset or parameters and finally combine the models with some kind of deterministic averaging process. This method usually results in a model with less variance than before.
+
+- **Boosting** - Uses the same learning algorithm several times, but sequentially (one model depends on the previous ones), trying to compensate the error, and combines them following a deterministic strategy. This method usually results in a model with less bias than before (variance can also be affected).
+
+- **Stacking** - This often uses different algorithms and combines them using a meta-model to output a combined prediction. This method (as boosting) usually results in a model with less bias than before (variance can also be affected).
+
+# Bagging
+
+Here we will compare two bagging algorithms, *treebag* and *random forest* against the usual *rpart* model.
+
+```{r bagging, warning=FALSE}
+set.seed(2020)
+control <- trainControl(
+  method = "boot",
+  number = 25,
+  savePredictions = "final",
+  classProbs = TRUE,
+  index = createResample(training$Classification, 25),
+  summaryFunction = twoClassSummary
+)
+metric <- "ROC"
+
+set.seed(2020)
+fit.rpart <- train(Classification ~ ., data = training, method = "rpart", metric = metric, trControl = control)
+
+set.seed(2020)
+fit.treebag <- train(Classification ~ .,
+  data = training,
+  method = "treebag", trControl = control, verbose = FALSE
+)
+
+set.seed(2020)
+fit.rf <- train(Classification ~ .,
+  data = training,
+  method = "rf", trControl = control, verbose = FALSE
+)
+```
+
+## Comparing training metrics
+
+```{r res_bagging, warning=FALSE}
+results_bag <- resamples(list(rpart = fit.rpart, treebag = fit.treebag, rf = fit.rf))
+
+# Compare models
+dotplot(results_bag)
+```
+
+## Comparing predictions
+
+```{r pred_bagging, warning=FALSE}
+pred_bag <- list()
+pred_bag$rpart <- predict(fit.rpart, newdata = testing, type = "prob")[, "Patient"]
+pred_bag$treebag <- predict(fit.treebag, newdata = testing, type = "prob")[, "Patient"]
+pred_bag$rf <- predict(fit.rf, newdata = testing, type = "prob")[, "Patient"]
+pred_bag <- data.frame(pred_bag)
+
+caTools::colAUC(pred_bag, testing$Classification, plotROC = TRUE)
+```
+
+# Boosting
+
+Here we will compare two boosting algorithms, *gbm* and *C5.0* against the usual *rpart* model.
+
+```{r boosting, warning=FALSE}
+set.seed(2020)
+control <- trainControl(
+  method = "boot",
+  number = 25,
+  savePredictions = "final",
+  classProbs = TRUE,
+  index = createResample(training$Classification, 25),
+  summaryFunction = twoClassSummary
+)
+metric <- "ROC"
+
+set.seed(2020)
+fit.rpart <- train(Classification ~ ., data = training, method = "rpart", metric = metric, trControl = control)
+
+set.seed(2020)
+fit.gbm <- train(Classification ~ .,
+  data = training,
+  method = "gbm", trControl = control, verbose = FALSE, distribution = "adaboost"
+)
+
+set.seed(2020)
+fit.c50 <- train(Classification ~ .,
+  data = training,
+  method = "C5.0", trControl = control, verbose = FALSE
+)
+```
+
+## Comparing training metrics
+
+```{r res_boost, warning=FALSE}
+results_boost <- resamples(list(rpart = fit.rpart, gbm = fit.gbm, c50 = fit.c50))
+
+# Compare models
+dotplot(results_boost)
+```
+
+## Comparing predictions
+
+```{r pred_boost, warning=FALSE}
+pred_boost <- list()
+pred_boost$rpart <- predict(fit.rpart, newdata = testing, type = "prob")[, "Patient"]
+pred_boost$gbm <- predict(fit.gbm, newdata = testing, type = "prob")[, "Patient"]
+pred_boost$c50 <- predict(fit.c50, newdata = testing, type = "prob")[, "Patient"]
+pred_boost <- data.frame(pred_boost)
+
+caTools::colAUC(pred_boost, testing$Classification, plotROC = TRUE)
+```
+
+# Stacking
+
+Here we will create a stacking model with *rpart*, *svmLinear* and *naive bayes* and compare with *rpart* alone.
+
+```{r stacking, warning=FALSE}
+# DO NOT use the trainControl object used to fit the training models to fit the ensemble.
+set.seed(2020)
+control <- trainControl(
+  method = "boot",
+  number = 25,
+  savePredictions = "final",
+  classProbs = TRUE,
+  index = createResample(training$Classification, 25),
+  summaryFunction = twoClassSummary
+)
+metric <- "ROC"
+
+model_list <- caretList(
+  Classification ~ .,
+  data = training,
+  trControl = control,
+  methodList = c("rpart", "svmLinear", "nb")
+)
+
+set.seed(2020)
+fit_control <- trainControl(
+  method = "boot",
+  number = 25,
+  savePredictions = "final",
+  classProbs = TRUE,
+  index = createResample(training$Classification, 25),
+  summaryFunction = twoClassSummary
+)
+
+set.seed(2020)
+fit.rpart <- train(Classification ~ .,
+  data = training, method = "rpart",
+  metric = metric, trControl = fit_control
+)
+
+set.seed(2020)
+fit.svm <- train(Classification ~ .,
+  data = training, method = "svmLinear",
+  metric = metric, trControl = fit_control
+)
+
+set.seed(2020)
+fit.nb <- train(Classification ~ .,
+  data = training, method = "nb",
+  metric = metric, trControl = fit_control
+)
+
+set.seed(2020)
+glm_ensemble <- caretStack(
+  model_list,
+  method = "glm",
+  metric = metric,
+  trControl = trainControl(
+    method = "boot",
+    number = 25,
+    savePredictions = "final",
+    classProbs = TRUE,
+    summaryFunction = twoClassSummary
+  )
+)
+```
+
+## Comparing training metrics
+
+```{r res_stacking, warning=FALSE}
+results_stack <- resamples(list(
+  rpart = fit.rpart, svm = fit.svm, nb = fit.nb,
+  stack = glm_ensemble$ens_model
+))
+
+# Compare models
+dotplot(results_stack)
+```
+
+## Comparing predictions
+
+```{r pred_stacking, warning=FALSE}
+model_preds <- lapply(model_list, predict, newdata = testing, type = "prob")
+model_preds <- lapply(model_preds, function(x) x[, "Patient"])
+model_preds <- data.frame(model_preds)
+
+model_preds$stack <- predict(glm_ensemble, newdata = testing, type = "prob")
+
+caTools::colAUC(model_preds, testing$Classification, plotROC = TRUE)
+```
+
+# Comparing all models
+
+Just as a summary, let's compare all models together.
+
+## Comparing training metrics
+
+It is interesting to see that although `SVM` is ranked as the best model, we clearly see that
+the `stack` ensemble is much more robust, having the shortest confidence interval. In general we can also
+notice that ensemble models are always better than `rpart` alone.
+
+```{r all_rocs}
+results_all <- resamples(list(
+  rpart = fit.rpart, svm = fit.svm, nb = fit.nb,
+  stack = glm_ensemble$ens_model, gbm = fit.gbm, c50 = fit.c50, treebag = fit.treebag, rf = fit.rf
+))
+
+# Compare models
+dotplot(results_all)
+```
+
+## Comparing predictions
+
+In the "final" test, the predictions in an independent dataset, `rpart` shows it's weakness in
+generalizing the prediction, while `rf` do a good job.
+
+```{r all_preds}
+all_preds <- data.frame(cbind(rpart = model_preds$rpart, svm = model_preds$svmLinear, nb = model_preds$nb, stack = model_preds$stack, gbm = pred_boost$gbm, c50 = pred_boost$c50, treebag = pred_bag$treebag, rf = pred_bag$rf))
+caTools::colAUC(all_preds, testing$Classification)
+```
+

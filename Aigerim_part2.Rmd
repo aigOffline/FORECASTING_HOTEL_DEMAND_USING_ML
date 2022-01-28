@@ -1,0 +1,160 @@
+---
+title: "Comparing classification techniques on iris dataset"
+output:
+  html_document:
+    df_print: paged
+author: 'Aigerim Madakimova'
+---
+
+### Load dataset and libraries
+
+```{r}
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(gmodels)
+library(pROC)
+library(e1071)
+library(gridExtra)
+library(randomForest)
+library(caret)
+
+data(iris)
+head(iris)
+```
+
+### EDA
+```{r}
+temp = as.data.frame(scale(iris[,1:4]))
+temp$Species = iris$Species
+summary(temp)
+```
+
+
+```{r}
+g1 = ggplot(temp,aes(x =Sepal.Length,y = Sepal.Width,color = Species)) + geom_point() + ggtitle("Sepal.Width vs Sepal.Length")
+
+g2 = ggplot(temp,aes(x =Petal.Length,y = Petal.Width,color = Species)) + geom_point() + ggtitle("Petal.Width vs Petal.Length")
+
+g3 = ggplot(temp,aes(x =Petal.Length,y = Sepal.Length,color = Species)) + geom_point() + ggtitle("Sepal.Length vs Petal.Length")
+
+g4 = ggplot(temp,aes(x =Petal.Width,y = Sepal.Width,color = Species)) + geom_point()  + ggtitle("Sepal.Width vs Petal.Width")
+
+grid.arrange(g1,g2,g3,g4,nrow = 2)
+```
+
+### Split data into training and testing sets
+
+```{r}
+smp_size =  100
+set.seed(123)
+train_ind = sample(seq_len(nrow(temp)), size = smp_size)
+train = temp[train_ind, ]
+test = temp[-train_ind, ]
+```
+
+
+# Decision Tree
+
+```{r}
+model.rpart = rpart(Species ~ . ,data =train)
+preds.rpart = predict(model.rpart,newdata = test,type = "class")
+CrossTable(test$Species,preds.rpart,chisq = F,prop.r = F,prop.c = F,prop.t = F,prop.chisq = F)
+```
+
+### Accuracy, ConfusionMatrix, Specificity, Precision, Recall (sensitivity) of Decision trees
+```{r}
+confusionMatrix(as.factor(preds.rpart),test$Species)
+```
+
+
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+### RoC_plot and AUC score of Decision trees
+
+```{r}
+multiclass.roc(as.numeric(preds.rpart), as.numeric(test$Species),plot = TRUE, auc.polygon=TRUE, grid=TRUE, print.auc=TRUE)
+```
+By observing the plots from “Exploratory Data Analysis”, we can clearly see a positive relationship/correlation between the variables of Iris dataset. Thus making decision trees ideal for the classification of the species.
+
+
+#  Logistic Regression
+```{r}
+library(nnet)
+model.glm = multinom(Species ~ ., data =train)
+preds.glm = predict(model.glm, newdata = test,type = "class" )
+```
+
+
+### Accuracy, ConfusionMatrix, Specificity, Precision, Recall (sensitivity) of Logistic Regression
+```{r}
+confusionMatrix(as.factor(preds.glm),test$Species)
+```
+
+### RoC_plot and AUC score of Logistic Regression
+
+```{r}
+multiclass.roc(as.numeric(preds.glm), as.numeric(test$Species),plot = TRUE, auc.polygon=TRUE, grid=TRUE, print.auc=TRUE)
+```
+KNN can be used for both classification and regression problem. KNN considers the most similar other items defined in terms of their attributes, look at their labels, and give the unassigned item the majority vote.
+
+
+
+# SVM
+```{r}
+model.svm = svm(Species ~ . ,data = train)
+preds.svm = predict(model.svm,newdata = test)
+CrossTable(preds.svm,test$Species,chisq = F,prop.r = F,prop.c = F,prop.t = F,prop.chisq = F)
+```
+
+
+### Accuracy, ConfusionMatrix, Specificity, Precision, Recall (sensitivity) of SVM
+```{r}
+confusionMatrix(as.factor(preds.svm),test$Species)
+```
+
+
+### RoC_plot and AUC score of SVM
+
+```{r}
+multiclass.roc(as.numeric(preds.svm), as.numeric(test$Species),plot = TRUE, auc.polygon=TRUE, grid=TRUE, print.auc=TRUE)
+```
+
+
+
+
+# K Nearest Neighbors
+
+```{r}
+library(class)
+cl = train$Species
+set.seed(1234)
+preds.knn = knn(train[,1:4],test[,1:4],cl,k=3)
+CrossTable(preds.knn,test$Species,chisq = F,prop.r = F,prop.c = F,prop.t = F,prop.chisq = F)
+```
+
+
+### Accuracy, ConfusionMatrix, Specificity, Precision, Recall (sensitivity) of KNN
+```{r}
+confusionMatrix(as.factor(preds.knn),test$Species)
+```
+
+### RoC_plot and AUC score of KNN
+
+```{r}
+multiclass.roc(as.numeric(preds.knn), as.numeric(test$Species),plot = TRUE, auc.polygon=TRUE, grid=TRUE, print.auc=TRUE)
+```
+
+# Classification table for each observation
+```{r}
+models = data.frame(Given_Class = test$Species, Logistic_regression = preds.glm, Decision_Tree = preds.rpart, KNN = preds.knn,  SVM = preds.svm)
+models
+```
+
+
+# Conclusions:
+
+KNN performed poorer than other algorithms as the number of observations and variables in our dataset are small. Also not all variables of Iris data are non-linearly dependent.

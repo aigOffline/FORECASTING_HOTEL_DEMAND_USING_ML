@@ -1,0 +1,282 @@
+---
+title: "EDA"
+author: "aigerim"
+date: "27 09 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+options(scipen = 999)
+library(data.table)
+library(tidyverse)
+library(GGally)
+library(skimr)
+library(plotly)
+library(memoise)
+library(scales)
+library(tsbox)
+library(treemap)
+library(fuzzyjoin)
+library(ggthemes)
+library(maps)
+library(forecast)
+theme_set(theme_light())
+```
+
+```{r}
+mem_parse_date <- memoise(parsedate::parse_date)
+```
+
+
+
+```{r}
+hotels_raw <- fread('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-02-11/hotels.csv') 
+skim(hotels_raw)
+#colSums(is.na(hotels_raw)) # not many NA's in the traditional form 
+#(hotels_raw$company %>% table())/nrow(hotels_raw) # but a lot in the form of "NULL"
+```
+
+```{r}
+hotels_cleaned <- hotels_raw %>%
+  dplyr::select(-company) %>% #90% + of values are na's
+  mutate(arrival_date = paste(arrival_date_day_of_month, arrival_date_month, arrival_date_year) %>% mem_parse_date()) %>% #date of arrival
+#Mutate adds new variables and preserves existing
+  mutate(total_number_of_people = adults + children + babies) %>%
+  mutate(children_and_babies = children + babies) %>%
+  mutate(country = if_else(country == 'CN', 'CAN', country)) %>%
+  mutate(total_nights = stays_in_weekend_nights + stays_in_week_nights) %>%
+  mutate(total_nights_cat = total_nights %>% as.factor() %>% fct_lump(., 5)) %>%
+  mutate(required_car_parking_spaces_binary = if_else(required_car_parking_spaces > 0, T,F)) %>%
+  dplyr::filter(adr %between% c(0,600)) %>%
+  na.omit()
+
+hotels_cleaned_not_cancelled <- hotels_cleaned[is_canceled == 0]
+```
+
+
+```{r}
+plot_people_total <- hotels_cleaned_not_cancelled  %>%
+  group_by(arrival_date, hotel) %>% 
+  summarize(people_per_day = sum(total_number_of_people)) %>%
+  ungroup() %>%
+  ggplot(aes(x = arrival_date, y = people_per_day, color = hotel)) + 
+  geom_line() + 
+  facet_wrap(~hotel)
+
+ggp_build <- plotly_build(plot_people_total)
+ggp_build
+```
+
+```{r}
+# August is the most occupied (busiest) month with 11.49% bookings and January is the most unoccupied month with 5.48% bookings.
+hotels_cleaned_not_cancelled  %>%
+  count(arrival_date_month) %>%
+  rename(how_many_guests_arrived = n) %>%
+  mutate(per_of_total = (100*how_many_guests_arrived / nrow(hotels_cleaned_not_cancelled)) %>% round(., 2) %>% paste(., '%'))
+  
+```
+
+```{r}
+plot_children <- hotels_cleaned_not_cancelled  %>%
+  group_by(arrival_date, hotel) %>% 
+  summarize(children_per_day = sum(children)) %>%
+  ungroup() %>%
+  ggplot(aes(x = arrival_date, y = children_per_day, color = hotel)) + 
+  geom_line()
+
+ggp_build <- plotly_build(plot_children)
+ggp_build
+```
+
+
+```{r}
+# as expected, the number of children and babies reaches its peak during summer months (July and August) and drops quickly before September
+
+children_and_babies_ts <- hotels_cleaned_not_cancelled  %>%
+  group_by(arrival_date) %>% 
+  summarize(children_per_day = sum(children_and_babies)) %>% 
+  ungroup() %>% 
+  mutate(arrival_date = as.Date(arrival_date)) %>% 
+  ts_ts() 
+
+ggplotly(
+  children_and_babies_ts %>% 
+  mstl() %>%
+  autoplot()
+)
+
+```
+
+```{r}
+#most guests (92%) of the two hotels do not have children and babies, while some have 1 or 2. Also there were rows with 9 and 10 children - probably groups 
+hotels_cleaned_not_cancelled %>% 
+  count(children_and_babies) %>% 
+  mutate(percent = round(n / nrow(hotels_cleaned_not_cancelled), 2))
+
+```
+
+```{r}
+#50% of the guests book their hotel approximately 45 days before the trip or less 
+hotels_cleaned_not_cancelled$lead_time %>% quantile(c(0.25, 0.5, 0.75))
+
+hotels_cleaned_not_cancelled %>% 
+  ggplot(aes(x = lead_time)) + 
+  geom_histogram() + 
+  geom_vline(xintercept = median(hotels_cleaned_not_cancelled$lead_time), color = 'red') + 
+  scale_x_log10()
+```
+
+```{r}
+# Out of the meals, BB (Bed & Breakfast) is the most ordered meal which is around 77.2%, followed by HB(Half Board), SC(no meal package), Undefined and FB (Full Board).
+hotels_cleaned_not_cancelled %>% 
+  count(meal) %>% 
+  mutate(percent = round(n / nrow(hotels_cleaned_not_cancelled), 2)) %>%
+  mutate(meal = fct_reorder(meal,n)) %>%
+  ggplot(aes(x = meal, y = n, fill = meal, label = percent)) + 
+  geom_col() + 
+  geom_label()
+```
+```{r}
+# Around 40% of all bookings were booked from 
+# Portugal followed by Great Britain(10%) & France(8%)
+
+world_map <- map_data('world') %>%
+  as.data.table() %>%
+  fuzzyjoin::regex_left_join(maps::iso3166 %>% select(mapname, country_code = a3), by = c('region' = 'mapname')) %>%
+  dplyr::filter(region != 'Antarctica')
+
+world_map_plot <- world_map %>%
+  left_join(hotels_cleaned %>% count(country), by = c('country_code' = 'country')) %>%
+  ggplot(aes(long, lat, group = group, fill = n, text = region)) + 
+  geom_polygon() +
+  scale_fill_gradient2(low = "yellow", mid = 'blue', high = 'red', midpoint = 1e4) + 
+  theme_map() 
+
+ggplotly(world_map_plot)
+```
+```{r}
+#the statistics with actual visitors is very similar
+
+world_map <- map_data('world') %>%
+  as.data.table() %>%
+  fuzzyjoin::regex_left_join(maps::iso3166 %>% select(mapname, country_code = a3), by = c('region' = 'mapname')) %>%
+  dplyr::filter(region != 'Antarctica')
+
+world_map_plot <- world_map %>%
+  left_join(hotels_cleaned_not_cancelled %>% count(country), by = c('country_code' = 'country')) %>%
+  ggplot(aes(long, lat, group = group, fill = n, text = region)) + 
+  geom_polygon() +
+  scale_fill_gradient2(low = "yellow", mid = 'blue', high = 'red', midpoint = 1e4) + 
+  theme_map() 
+
+ggplotly(world_map_plot)
+```
+
+
+```{r}
+#Around 47% of bookings are made via Online Travel Agents, almost 20% of bookings are made via Offline Travel Agents and less than 20% are Direct bookings without any other agents.
+hotels_cleaned %>%
+  group_by(market_segment) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(market_segment = fct_reorder(market_segment,n)) %>%
+  ggplot(aes(x = market_segment, y = n)) + 
+  geom_col()
+
+```
+
+```{r}
+# Most of the customers belong to the Transient type 
+hotels_cleaned_not_cancelled %>%
+  group_by(customer_type) %>% 
+  count() %>% 
+  ungroup() %>% 
+  mutate(customer_type = fct_reorder(customer_type,n)) %>%
+  ggplot(aes(x = customer_type, y = n)) + 
+  geom_col()
+
+```
+
+```{r}
+#Most people stay only for 1-3 nights
+hotels_cleaned_not_cancelled %>% 
+  count(total_nights_cat) %>%
+  ggplot(aes(x = total_nights_cat, y = n)) + 
+  geom_col() + 
+  coord_flip()
+```
+
+```{r}
+#most people do not have any special requests, while some have 1 or 2
+hotels_cleaned_not_cancelled %>% 
+  mutate(total_of_special_requests = total_of_special_requests %>% as.factor() %>% fct_lump(.,3)) %>%
+  count(total_of_special_requests) %>%
+  ggplot(aes(x = total_of_special_requests, y = n )) + 
+  geom_col() + 
+  coord_flip()
+```
+```{r}
+#37% of the bookings are canceled
+(hotels_cleaned$is_canceled %>% table() %>% c())/nrow(hotels_cleaned)
+```
+
+```{r}
+#almost everybody in the dataset is a new guest 
+(hotels_cleaned_not_cancelled$is_repeated_guest  %>% table() %>% c())/nrow(hotels_cleaned_not_cancelled)
+```
+```{r}
+#most people do not require parking spaces
+hotels_cleaned_not_cancelled %>% count(required_car_parking_spaces_binary)
+```
+
+```{r}
+#types 'A' and 'D' are by far the most popular (the hotels that provided data for this dataset didn't specify the differences between room types for anonymity resons)
+hotels_cleaned_not_cancelled %>% 
+  count(reserved_room_type) %>%
+  treemap(.,
+            index="reserved_room_type",
+            vSize="n",
+            type="index",
+            title = 'Reserved Room types' 
+            )
+```
+
+```{r}
+#Average Daily Rate as defined by dividing the sum of all lodging transactions by the total number of staying nights
+#most people are near the value of 100 with a log of outliers including a negative one (should be excluded) and a very positive one
+#so i included a filtering step to the processing of the data 
+hotels_raw %>%
+  ggplot(aes(y = adr)) + 
+  geom_boxplot() + 
+  scale_y_log10() + 
+  coord_flip()
+
+hotels_raw %>% arrange(adr) 
+hotels_raw %>% arrange(desc(adr)) 
+```
+
+```{r}
+# adr is positively  and stat.sign correlated with the number of children + babies 
+# adr is positively  and stat.sign correlated  with the number of total requests
+# the number of total requests is positively  and stat.sign correlated with the number of children + babies
+
+hotels_cleaned_not_cancelled %>%
+  select(adr, children_and_babies, required_car_parking_spaces_binary, total_of_special_requests) %>% 
+  ggpairs(aes(fill = children_and_babies))
+
+```
+
+After concluding the EDA, we could formulate two goals that might be useful for hotels and other related businesses
+1) Be able to predict what rooms are being booked by different people in order to better coordinate marketing (what customers do we target) and logistical/construction strategies (how many rooms of different types we need to have). For example, the top management decided to increase the focus on the business audience. A working classificator for reserved rooms type would provide an opportinity to estimate the expected distribution of reserved rooms for the given distribution of customes (simulation) 
+2) Be able to predict whether or not the customer is going to cancel the booking in order to predict the loading of the hotel slightly better?
+
+
+
+
+
+
+
